@@ -1,0 +1,66 @@
+{
+  "components": {
+    "schemas": {
+      "HealthOut": {
+        "description": "Health check body; carries a status only, never data (NFR-08).",
+        "properties": {
+          "status": {
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthOut",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "",
+    "title": "Invoicing API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "description": "Liveness and database check for the uptime monitor.\n\nServed at /api/v1/health, not /healthz: Cloud Run answers some paths ending in \"z\" itself.\n\nArgs:\n    request: incoming request; unused, public endpoint.\n\nRaises:\n    None; database errors are caught and reported as 503.\n\nReturns:\n    Status 200 with \"ok\" when the database answers, else 503 with \"error\".",
+        "operationId": "health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  },
+  "servers": []
+}
