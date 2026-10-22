@@ -1,0 +1,73 @@
+# Local development: `make up` (or `docker compose up`), then open http://localhost:5173
+name: invoicing
+
+services:
+  # PostgreSQL 17, matching production; host port 5433 avoids clashing with a local 5432
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "5433:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Django API with auto-reload; source is bind-mounted, dependencies live in the image
+  backend:
+    build:
+      context: .
+      target: dev
+    # Run as the host user so files Django writes (migrations) stay editable
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    environment:
+      HOME: /tmp
+      DJANGO_SECRET_KEY: dev-only-not-a-secret
+      DJANGO_DEBUG: "1"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:5173,http://localhost:8000
+      DATABASE_URL: postgres://app:app@db:5432/app
+      EMAIL_HOST: mailpit
+      EMAIL_PORT: "1025"
+    command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Vite dev server with hot reload; proxies /api, /admin, /static, /_allauth to Django
+  frontend:
+    image: node:24-slim
+    working_dir: /app
+    environment:
+      DJANGO_ORIGIN: http://backend:8000
+    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      # Container-owned installs and SvelteKit output, kept off the host checkout
+      - frontend-node-modules:/app/node_modules
+      - frontend-svelte-kit:/app/.svelte-kit
+    depends_on:
+      - backend
+
+  # Catches every email Django sends; web UI at http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    ports:
+      - "8025:8025"
+
+volumes:
+  db-data:
+  frontend-node-modules:
+  frontend-svelte-kit:

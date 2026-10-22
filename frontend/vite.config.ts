@@ -19,8 +19,9 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			// SPA build: static files Django serves; unknown paths fall back to index.html
-			adapter: adapter({ fallback: 'index.html' })
+			// SPA build: static files Django serves; unknown paths fall back to index.html.
+			// precompress writes .gz/.br copies that WhiteNoise serves to supporting browsers
+			adapter: adapter({ fallback: 'index.html', precompress: true })
 		}),
 		svelteTesting()
 	],

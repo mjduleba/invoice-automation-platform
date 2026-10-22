@@ -27,6 +27,11 @@ package = false
 DJANGO_SETTINGS_MODULE = "config.settings"
 addopts = "--reuse-db"
 testpaths = ["tests"]
+# Warnings fail tests so deprecations surface early; WhiteNoise's missing-STATIC_ROOT notice is expected
+filterwarnings = [
+    "error",
+    "ignore:No directory at:UserWarning",
+]
 
 [tool.ruff]
 target-version = "py312"

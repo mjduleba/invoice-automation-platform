@@ -30,6 +30,7 @@ INSTALLED_APPS = [
 # Request pipeline
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # static + SPA files, right after security
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -79,9 +80,20 @@ TIME_ZONE = "America/New_York"
 USE_I18N = True
 USE_TZ = True
 
-# Static files: collected for Django admin; WhiteNoise serves them in production
+# Static files: collected for Django admin; WhiteNoise serves them with hashed names
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
+
+# Built SvelteKit SPA: WhiteNoise serves its files at the site root; the SPA view serves index.html
+FRONTEND_BUILD_DIR = Path(env.str("FRONTEND_BUILD_DIR", default=str(BASE_DIR / "frontend_build")))
+WHITENOISE_ROOT = FRONTEND_BUILD_DIR if FRONTEND_BUILD_DIR.is_dir() else None
+
+# Long-cache content-hashed files: SvelteKit's _app/immutable and Django's manifest names
+WHITENOISE_IMMUTABLE_FILE_TEST = r"^/_app/immutable/|^/static/.+\.[0-9a-f]{12}\.\w+$"
 
 # Email: defaults to Mailpit for local dev; owner's mailbox settings arrive in M8
 EMAIL_HOST = env.str("EMAIL_HOST", default="localhost")
