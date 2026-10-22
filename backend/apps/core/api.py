@@ -1,3 +1,5 @@
+"""System endpoints that are not tied to a business resource."""
+
 import logging
 from typing import Literal
 
@@ -11,6 +13,8 @@ router = Router(tags=["system"])
 
 
 class HealthOut(Schema):
+    """Health check body; carries a status only, never data (NFR-08)."""
+
     status: Literal["ok", "error"]
 
 
@@ -21,11 +25,20 @@ class HealthOut(Schema):
     operation_id="health",
 )
 def health(request: HttpRequest) -> Status[HealthOut]:
-    """Liveness and database check for the uptime monitor; returns no data.
+    """Liveness and database check for the uptime monitor.
 
-    Lives at /api/v1/health rather than /healthz because Cloud Run reserves
-    some paths ending in "z" and answers /healthz itself.
+    Served at /api/v1/health, not /healthz: Cloud Run answers some paths ending in "z" itself.
+
+    Args:
+        request: incoming request; unused, public endpoint.
+
+    Raises:
+        None; database errors are caught and reported as 503.
+
+    Returns:
+        Status 200 with "ok" when the database answers, else 503 with "error".
     """
+    # Round-trip a trivial query to prove the database connection works
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")

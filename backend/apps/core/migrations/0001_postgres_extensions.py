@@ -1,20 +1,17 @@
-"""Enable the extensions the schema depends on.
-
-pg_trgm backs client search (FR-002); btree_gist backs the agreement
-exclusion constraint (FR-005). Both are trusted extensions, so the database
-owner can create them without superuser rights.
-"""
+"""Enable trusted Postgres extensions; the database owner can create them without superuser."""
 
 from django.contrib.postgres.operations import BtreeGistExtension, TrigramExtension
 from django.db import migrations
 
 
 class Migration(migrations.Migration):
+    """Install pg_trgm and btree_gist."""
+
     initial = True
 
     dependencies = []
 
     operations = [
-        TrigramExtension(),
-        BtreeGistExtension(),
+        TrigramExtension(),  # client search across name, address, email, phone (FR-002)
+        BtreeGistExtension(),  # agreement exclusion constraint on overlapping dates (FR-005)
     ]

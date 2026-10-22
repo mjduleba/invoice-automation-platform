@@ -1,22 +1,20 @@
-"""Django settings.
-
-Every deploy-specific value comes from environment variables, so the same image
-runs locally, in CI, in staging and in production. Secrets are never defaults.
-"""
+"""Django settings; every deploy-specific value comes from environment variables."""
 
 from pathlib import Path
 
 import environ
 
+# Paths and environment reader
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 env = environ.Env()
 
+# Core: secret key has no default so a misconfigured deploy fails fast
 SECRET_KEY = env.str("DJANGO_SECRET_KEY")
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 CSRF_TRUSTED_ORIGINS = env.list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
 
+# Applications: Django contrib, Ninja (schema export command, docs assets), project apps
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -29,6 +27,7 @@ INSTALLED_APPS = [
     "apps.core",
 ]
 
+# Request pipeline
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -39,9 +38,11 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+# URL and WSGI entry points
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 
+# Templates: Django admin now, invoice PDF templates in M8
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -57,11 +58,11 @@ TEMPLATES = [
     },
 ]
 
-# PostgreSQL 17 only; the schema relies on pg_trgm and btree_gist.
+# Database: PostgreSQL 17 only; schema relies on pg_trgm and btree_gist
 DATABASES = {"default": env.db("DATABASE_URL")}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Password Validators
+# Password validators: PRD minimum of 12 characters plus Django defaults
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
@@ -72,29 +73,29 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# Language and Time Zone settings
+# Language and time zone: owner works in America/New_York
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "America/New_York"
 USE_I18N = True
 USE_TZ = True
 
+# Static files: collected for Django admin; WhiteNoise serves them in production
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# Local dev points at Mailpit; real mail settings arrive with M8.
+# Email: defaults to Mailpit for local dev; owner's mailbox settings arrive in M8
 EMAIL_HOST = env.str("EMAIL_HOST", default="localhost")
 EMAIL_PORT = env.int("EMAIL_PORT", default=1025)
 
-# Cloud Run terminates TLS and forwards the original scheme.
+# HTTPS: Cloud Run terminates TLS and forwards the original scheme
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SECURE_HSTS_SECONDS = 0 if DEBUG else 60 * 60 * 24 * 365
 SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
 
+# Deploy checks silenced on purpose
 SILENCED_SYSTEM_CHECKS = [
-    # Cloud Run only accepts HTTPS, so Django never sees a plain-HTTP request to redirect.
-    "security.W008",
-    # HSTS preload would commit all of mjduleba.com, not just this app.
-    "security.W021",
+    "security.W008",  # Cloud Run only accepts HTTPS; no plain-HTTP request reaches Django
+    "security.W021",  # HSTS preload would commit all of mjduleba.com, not just this app
 ]
