@@ -1,0 +1,193 @@
+# Lint, type checks, tests, secret scan and a production image smoke test on every PR and push to main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only token; no job writes to the repo
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the run it replaces
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    # Real Postgres 17, matching production; the schema relies on its extensions
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    # Throwaway CI values; settings and the mypy Django plugin both read them
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-a-secret
+      DATABASE_URL: postgres://app:app@localhost:5432/app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Same uv as the Dockerfile; cache keyed on the lockfile
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.23"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Lint and formatting
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy .
+
+      - name: Pytest
+        run: uv run pytest
+
+      # Production settings must pass Django's deploy checklist; key is generated per run
+      - name: Deploy checks
+        run: |
+          DJANGO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')" \
+            uv run python manage.py check --deploy --fail-level WARNING
+        env:
+          DJANGO_DEBUG: "0"
+          DJANGO_ALLOWED_HOSTS: invoices.mjduleba.com
+
+      # Committed schema must match the API; fix with `make api`
+      - name: OpenAPI schema is up to date
+        run: |
+          uv run python manage.py export_openapi_schema --api config.api.api --indent 2 --sorted \
+            > ../frontend/src/lib/api/openapi.json
+          git diff --exit-code -- ../frontend/src/lib/api/openapi.json \
+            || { echo "::error::openapi.json is stale; run 'make api' and commit"; exit 1; }
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Prettier and ESLint, then svelte-check for types
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npm run check
+
+      - name: Vitest
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # Committed TypeScript types must match openapi.json; fix with `make api`
+      - name: API types are up to date
+        run: |
+          npm run --silent gen:api
+          git diff --exit-code -- src/lib/api/schema.d.ts \
+            || { echo "::error::schema.d.ts is stale; run 'make api' and commit"; exit 1; }
+
+  gitleaks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The action lists a PR's commits through the API
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      # Full history so every commit is scanned, not just the tip
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Free for personal accounts; an organization would need GITLEAKS_LICENSE
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Build the image Cloud Run will run; layers cached between runs
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: prod
+          tags: invoicing:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Production settings (DEBUG off) on the host network so it reaches the Postgres service
+      - name: Start container
+        run: |
+          docker run -d --name app --network host \
+            -e DJANGO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')" \
+            -e DATABASE_URL=postgres://app:app@localhost:5432/app \
+            -e DJANGO_ALLOWED_HOSTS=localhost \
+            invoicing:ci
+
+      # Django answers the API and serves the built SPA from one port
+      - name: Smoke test
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8080/api/v1/health && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/api/v1/health | grep -q '"status": *"ok"'
+          curl -fsS http://localhost:8080/log | grep -q '/_app/immutable/'
+
+      - name: Container logs
+        if: always()
+        run: docker logs app
