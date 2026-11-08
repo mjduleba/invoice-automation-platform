@@ -37,3 +37,25 @@ filterwarnings = [
 target-version = "py312"
 line-length = 100
 extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, bugbear, pyupgrade, Django, Bandit security
+select = ["E", "F", "I", "B", "UP", "DJ", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest relies on bare assert
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["mypy_django_plugin.main"]
+
+# django-environ ships no type hints; settings values are checked through the Django plugin
+[[tool.mypy.overrides]]
+module = ["environ"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+# Plugin imports settings, so DJANGO_SECRET_KEY and DATABASE_URL must be set when mypy runs
+django_settings_module = "config.settings"
